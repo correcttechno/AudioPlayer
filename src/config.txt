@@ -1,0 +1,69 @@
+#include <Arduino.h>
+
+#define SET_PIN 4
+
+HardwareSerial HC12(2); // UART2
+
+void sendCommand(String cmd) {
+  Serial.print("Gonderilen: ");
+  Serial.println(cmd);
+
+  HC12.println(cmd);
+  delay(300);
+
+  while (HC12.available()) {
+    char c = HC12.read();
+    Serial.write(c);
+  }
+  Serial.println();
+}
+
+void setup() {
+  Serial.begin(115200);
+
+  // HC-12 UART
+  HC12.begin(9600, SERIAL_8N1, 16, 17);
+
+  pinMode(SET_PIN, OUTPUT);
+
+  // AT moda gir
+  digitalWrite(SET_PIN, LOW);
+  delay(100);
+
+  Serial.println("AT moda girildi");
+
+  // Test
+  sendCommand("AT");
+
+  // Maksimum güç (20dBm)
+  sendCommand("AT+P8");
+
+  // Kanal (isteğe bağlı, örnek: kanal 1)
+  sendCommand("AT+C001");
+
+  // Baud rate (isteğe bağlı)
+  sendCommand("AT+B9600");
+
+  // FU4 (uzun mesafe, max power modu)
+  sendCommand("AT+FU4");
+
+  Serial.println("Ayarlar tamamlandi");
+
+  // Normal moda dön
+  digitalWrite(SET_PIN, HIGH);
+  delay(100);
+
+  Serial.println("Normal moda donuldu");
+}
+
+void loop() {
+  // HC-12'den gelen verileri oku
+  while (HC12.available()) {
+    Serial.write(HC12.read());
+  }
+
+  // Serial'dan HC-12'ye veri gonder
+  while (Serial.available()) {
+    HC12.write(Serial.read());
+  }
+}
