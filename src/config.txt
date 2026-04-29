@@ -42,10 +42,10 @@ void setup() {
   sendCommand("AT+C001");
 
   // Baud rate (isteğe bağlı)
-  sendCommand("AT+B9600");
+  sendCommand("AT+B115200");
 
   // FU4 (uzun mesafe, max power modu)
-  sendCommand("AT+FU4");
+  sendCommand("AT+FU3");
 
   Serial.println("Ayarlar tamamlandi");
 
