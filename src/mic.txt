@@ -46,33 +46,35 @@ void setup() {
   Serial.println("Verici Hazir (8kHz)");
 }
 
-// Verici loop kısmı (PCM Hazırlığı)
+
+
+// 16-bit PCM'i 8-bit u-Law'a çeviren fonksiyon
+uint8_t encode_uLaw(int16_t pcm_val) {
+    #define BIAS 0x84
+    #define CLIP 32635
+    int mask, exponent, mantissa, seg;
+    uint8_t uval;
+
+    pcm_val = (pcm_val < 0) ? (mask = 0x7F, -pcm_val) : (mask = 0xFF, pcm_val);
+    if (pcm_val > CLIP) pcm_val = CLIP;
+    pcm_val += BIAS;
+
+    for (exponent = 0, seg = 0x100; pcm_val > seg; exponent++, seg <<= 1);
+    mantissa = (pcm_val >> (exponent + 3)) & 0x0F;
+    uval = (exponent << 4) | mantissa;
+    return (uval ^ mask);
+}
+
 void loop() {
-  size_t bytesRead = 0;
-  // I2S'den ham 16-bit PCM verisi okunur[cite: 1]
-  esp_err_t result = i2s_read(I2S_PORT, micBuffer, sizeof(micBuffer), &bytesRead, portMAX_DELAY);
+    size_t bytesRead = 0;
+    esp_err_t result = i2s_read(I2S_PORT, micBuffer, sizeof(micBuffer), &bytesRead, portMAX_DELAY);
 
-  if (result == ESP_OK && bytesRead > 0) {
-    int samples = bytesRead / sizeof(int16_t);
-    int j = 0;
-
-    for (int i = 0; i < samples; i += 2) { // 16kHz -> 8kHz Downsampling
-      // Sinyal genliğini optimize ederek 8-bit PCM'e dönüştür
-      // micBuffer[i] ham PCM verisidir[cite: 1]
-      int32_t sample = micBuffer[i];
-      
-      // Basit bir kazanç (gain) ve normalize işlemi
-      sample = sample >> 8;           // 16-bit -> 8-bit
-      sample += 128;                  // Unsigned PCM formatına çevir[cite: 1]
-      
-      // Sınırlandırma (Clipping)
-      if (sample > 255) sample = 255;
-      if (sample < 0) sample = 0;
-
-      sendBuffer[j] = (uint8_t)sample;
-      j++;
+    if (result == ESP_OK && bytesRead > 0) {
+        int samples = bytesRead / sizeof(int16_t);
+        int j = 0;
+        for (int i = 0; i < samples; i += 2) { // 16kHz -> 8kHz Downsampling
+            sendBuffer[j++] = encode_uLaw(micBuffer[i]);
+        }
+        Serial2.write(sendBuffer, j); 
     }
-    // HC-12 üzerinden PCM paketini gönder[cite: 1]
-    Serial2.write(sendBuffer, j); 
-  }
 }

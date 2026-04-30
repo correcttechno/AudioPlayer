@@ -9,22 +9,32 @@ volatile int readIndex = 0;
 
 hw_timer_t *timer = NULL;
 
-// 8kHz için Timer (1.000.000 / 8000 = 125)
-// Alıcı onTimer fonksiyonu (PCM Çalma)
-void IRAM_ATTR onTimer() {
-  // Buffer'da yeterli PCM verisi var mı kontrol et
-  int availableData = (writeIndex >= readIndex) ? 
-                      (writeIndex - readIndex) : 
-                      (BUFFER_SIZE - readIndex + writeIndex);
 
-  // Buffer'da en az 100 byte birikmeden çalma (Cızırtıyı önlemek için önbellekleme)
-  if (availableData > 100) { 
-    dacWrite(DAC_PIN, buffer[readIndex]); // PCM değerini DAC'a bas[cite: 2]
-    readIndex = (readIndex + 1) % BUFFER_SIZE;
-  } else {
-    // Veri yetersizse hoparlörü merkez değerde (sessiz) tut
-    dacWrite(DAC_PIN, 128); 
-  }
+// 8-bit u-Law'u 16-bit PCM'e geri çeviren tablo (Hız için)
+const int16_t decode_uLaw_Table[256] = {
+    -32124, -31100, -30076, -29052, -28028, -27004, -25980, -24956, // ... (Tablo devamı mantığı)
+    // Sadeleştirme adına çalışma anında hesaplayan fonksiyonu kullanalım:
+};
+
+int16_t decode_uLaw(uint8_t u_val) {
+    u_val = ~u_val;
+    int t = ((u_val & 0x0F) << 3) + 0x84;
+    t <<= (u_val & 0x70) >> 4;
+    return ((u_val & 0x80) ? (0x84 - t) : (t - 0x84));
+}
+
+void IRAM_ATTR onTimer() {
+    int availableData = (writeIndex >= readIndex) ? (writeIndex - readIndex) : (BUFFER_SIZE - readIndex + writeIndex);
+
+    if (availableData > 150) { // Buffer eşiğini biraz artırdık
+        int16_t decodedSample = decode_uLaw(buffer[readIndex]);
+        // 16-bit veriyi DAC'ın anlayacağı 8-bit (0-255) aralığına çekiyoruz
+        uint8_t dacVal = (decodedSample >> 8) + 128;
+        dacWrite(DAC_PIN, dacVal);
+        readIndex = (readIndex + 1) % BUFFER_SIZE;
+    } else {
+        dacWrite(DAC_PIN, 128); // Sessizlik hali
+    }
 }
 
 void setup() {
