@@ -28,7 +28,7 @@ void setup() {
   Serial.begin(115200);
 
   // HC-12 başlat
-  Serial2.begin(9600, SERIAL_8N1, HC12_RX_PIN, HC12_TX_PIN);
+  Serial2.begin(57600, SERIAL_8N1, HC12_RX_PIN, HC12_TX_PIN);
 
   // DAC Timer başlat (≈16kHz)
   timer = timerBegin(0, 80, true);
