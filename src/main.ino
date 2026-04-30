@@ -1,32 +1,29 @@
-// =============================================
-// ESP32 VERİCİ (Mikrofon + HC-12)
-// =============================================
-
 #include <driver/i2s.h>
 
 #define I2S_PORT          I2S_NUM_0
-#define I2S_SCK           32    // BCLK
-#define I2S_WS            26    // LRCLK
-#define I2S_SD            33    // DOUT
+#define I2S_SCK           32
+#define I2S_WS            26
+#define I2S_SD            33
 
-// HC-12 bağlantısı
 #define HC12_RX_PIN       16
 #define HC12_TX_PIN       17
 
-#define MIC_BUFFER_SIZE   512
+// Veri miktarını azaltmak için örnekleme hızını 8000'e çektik
+#define SAMPLE_RATE       16000
+#define MIC_BUFFER_SIZE   128  // Daha küçük paketler HC-12 için daha iyidir
 int16_t micBuffer[MIC_BUFFER_SIZE];
 uint8_t sendBuffer[MIC_BUFFER_SIZE];
 
 void i2s_init() {
   i2s_config_t i2s_config = {
     .mode = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_RX),
-    .sample_rate = 16000,
+    .sample_rate = SAMPLE_RATE,
     .bits_per_sample = I2S_BITS_PER_SAMPLE_16BIT,
     .channel_format = I2S_CHANNEL_FMT_ONLY_LEFT,
     .communication_format = I2S_COMM_FORMAT_STAND_I2S,
     .intr_alloc_flags = 0,
     .dma_buf_count = 8,
-    .dma_buf_len = 256,
+    .dma_buf_len = 128,
     .use_apll = false
   };
 
@@ -39,37 +36,29 @@ void i2s_init() {
 
   i2s_driver_install(I2S_PORT, &i2s_config, 0, NULL);
   i2s_set_pin(I2S_PORT, &pin_config);
-  i2s_zero_dma_buffer(I2S_PORT);
 }
 
 void setup() {
   Serial.begin(115200);
-  
-  // HC-12 başlat
-  Serial2.begin(57600, SERIAL_8N1, HC12_RX_PIN, HC12_TX_PIN);
-  
-  // I2S Mikrofon başlat
+  // HC-12 hızını 115200'e çıkardık
+  Serial2.begin(115200, SERIAL_8N1, HC12_RX_PIN, HC12_TX_PIN);
   i2s_init();
-
-  Serial.println("=== ESP32 VERICI (Mikrofon) Basladi ===");
+  Serial.println("Verici Hazir (8kHz)");
 }
 
 void loop() {
   size_t bytesRead = 0;
-  
-  esp_err_t result = i2s_read(I2S_PORT, micBuffer, sizeof(micBuffer), &bytesRead, 0);
+  esp_err_t result = i2s_read(I2S_PORT, micBuffer, sizeof(micBuffer), &bytesRead, portMAX_DELAY);
 
   if (result == ESP_OK && bytesRead > 0) {
     int samples = bytesRead / sizeof(int16_t);
-
-    // 16-bit → 8-bit dönüşüm
-    for (int i = 0; i < samples; i++) {
-      sendBuffer[i] = (micBuffer[i] >> 8) + 128;   // 0-255 aralığına getir
+    int j = 0;
+    // Downsampling: Her 2 örnekten 1 tanesini alarak veri hızını 8kHz'e düşürüyoruz
+    for (int i = 0; i < samples; i += 2) { 
+      sendBuffer[j] = (micBuffer[i] >> 8) + 128;
+      j++;
     }
-
-    // HC-12 ile gönder
-    Serial2.write(sendBuffer, samples);
+    // Sadece j kadar (yarısı kadar) veri gönderiyoruz
+    Serial2.write(sendBuffer, j); 
   }
-
- 
 }
