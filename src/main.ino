@@ -1,64 +1,55 @@
-#include <driver/i2s.h>
-
-#define I2S_PORT          I2S_NUM_0
-#define I2S_SCK           32
-#define I2S_WS            26
-#define I2S_SD            33
-
+#define DAC_PIN           25
 #define HC12_RX_PIN       16
 #define HC12_TX_PIN       17
 
-// Veri miktarını azaltmak için örnekleme hızını 8000'e çektik
-#define SAMPLE_RATE       16000
-#define MIC_BUFFER_SIZE   128  // Daha küçük paketler HC-12 için daha iyidir
-int16_t micBuffer[MIC_BUFFER_SIZE];
-uint8_t sendBuffer[MIC_BUFFER_SIZE];
+#define BUFFER_SIZE       2048
+uint8_t buffer[BUFFER_SIZE];
+volatile int writeIndex = 0;
+volatile int readIndex = 0;
 
-void i2s_init() {
-  i2s_config_t i2s_config = {
-    .mode = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_RX),
-    .sample_rate = SAMPLE_RATE,
-    .bits_per_sample = I2S_BITS_PER_SAMPLE_16BIT,
-    .channel_format = I2S_CHANNEL_FMT_ONLY_LEFT,
-    .communication_format = I2S_COMM_FORMAT_STAND_I2S,
-    .intr_alloc_flags = 0,
-    .dma_buf_count = 8,
-    .dma_buf_len = 128,
-    .use_apll = false
-  };
+hw_timer_t *timer = NULL;
 
-  i2s_pin_config_t pin_config = {
-    .bck_io_num = I2S_SCK,
-    .ws_io_num = I2S_WS,
-    .data_out_num = I2S_PIN_NO_CHANGE,
-    .data_in_num = I2S_SD
-  };
+// 8kHz için Timer (1.000.000 / 8000 = 125)
+// Alıcı onTimer fonksiyonu (PCM Çalma)
+void IRAM_ATTR onTimer() {
+  // Buffer'da yeterli PCM verisi var mı kontrol et
+  int availableData = (writeIndex >= readIndex) ? 
+                      (writeIndex - readIndex) : 
+                      (BUFFER_SIZE - readIndex + writeIndex);
 
-  i2s_driver_install(I2S_PORT, &i2s_config, 0, NULL);
-  i2s_set_pin(I2S_PORT, &pin_config);
+  // Buffer'da en az 100 byte birikmeden çalma (Cızırtıyı önlemek için önbellekleme)
+  if (availableData > 100) { 
+    dacWrite(DAC_PIN, buffer[readIndex]); // PCM değerini DAC'a bas[cite: 2]
+    readIndex = (readIndex + 1) % BUFFER_SIZE;
+  } else {
+    // Veri yetersizse hoparlörü merkez değerde (sessiz) tut
+    dacWrite(DAC_PIN, 128); 
+  }
 }
 
 void setup() {
   Serial.begin(115200);
   // HC-12 hızını 115200'e çıkardık
   Serial2.begin(115200, SERIAL_8N1, HC12_RX_PIN, HC12_TX_PIN);
-  i2s_init();
-  Serial.println("Verici Hazir (8kHz)");
+
+  // Timer ayarı: 80 prescaler (1MHz), 125 count = 8kHz
+  timer = timerBegin(0, 80, true);
+  timerAttachInterrupt(timer, &onTimer, true);
+  timerAlarmWrite(timer, 125, true); // 125 mikrosaniyede bir tetiklen
+  timerAlarmEnable(timer);
+
+  Serial.println("Alici Hazir (8kHz)");
 }
 
 void loop() {
-  size_t bytesRead = 0;
-  esp_err_t result = i2s_read(I2S_PORT, micBuffer, sizeof(micBuffer), &bytesRead, portMAX_DELAY);
-
-  if (result == ESP_OK && bytesRead > 0) {
-    int samples = bytesRead / sizeof(int16_t);
-    int j = 0;
-    // Downsampling: Her 2 örnekten 1 tanesini alarak veri hızını 8kHz'e düşürüyoruz
-    for (int i = 0; i < samples; i += 2) { 
-      sendBuffer[j] = (micBuffer[i] >> 8) + 128;
-      j++;
+  while (Serial2.available()) {
+    uint8_t incoming = Serial2.read();
+    int next = (writeIndex + 1) % BUFFER_SIZE;
+    if (next != readIndex) {
+      buffer[writeIndex] = incoming;
+      writeIndex = next;
     }
-    // Sadece j kadar (yarısı kadar) veri gönderiyoruz
-    Serial2.write(sendBuffer, j); 
   }
+  // CPU'yu boğmamak için çok küçük bir bekleme
+  yield(); 
 }

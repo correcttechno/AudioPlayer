@@ -46,19 +46,33 @@ void setup() {
   Serial.println("Verici Hazir (8kHz)");
 }
 
+// Verici loop kısmı (PCM Hazırlığı)
 void loop() {
   size_t bytesRead = 0;
+  // I2S'den ham 16-bit PCM verisi okunur[cite: 1]
   esp_err_t result = i2s_read(I2S_PORT, micBuffer, sizeof(micBuffer), &bytesRead, portMAX_DELAY);
 
   if (result == ESP_OK && bytesRead > 0) {
     int samples = bytesRead / sizeof(int16_t);
     int j = 0;
-    // Downsampling: Her 2 örnekten 1 tanesini alarak veri hızını 8kHz'e düşürüyoruz
-    for (int i = 0; i < samples; i += 2) { 
-      sendBuffer[j] = (micBuffer[i] >> 8) + 128;
+
+    for (int i = 0; i < samples; i += 2) { // 16kHz -> 8kHz Downsampling
+      // Sinyal genliğini optimize ederek 8-bit PCM'e dönüştür
+      // micBuffer[i] ham PCM verisidir[cite: 1]
+      int32_t sample = micBuffer[i];
+      
+      // Basit bir kazanç (gain) ve normalize işlemi
+      sample = sample >> 8;           // 16-bit -> 8-bit
+      sample += 128;                  // Unsigned PCM formatına çevir[cite: 1]
+      
+      // Sınırlandırma (Clipping)
+      if (sample > 255) sample = 255;
+      if (sample < 0) sample = 0;
+
+      sendBuffer[j] = (uint8_t)sample;
       j++;
     }
-    // Sadece j kadar (yarısı kadar) veri gönderiyoruz
+    // HC-12 üzerinden PCM paketini gönder[cite: 1]
     Serial2.write(sendBuffer, j); 
   }
 }
